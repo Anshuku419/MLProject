@@ -1,57 +1,95 @@
 import os
 import sys
+import pandas as pd
+import pickle
+from sklearn.preprocessing import StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from dataclasses import dataclass
 from src.exception import CustomException
 from src.logger import logging
-import pandas as pd
-
-from sklearn.model_selection import train_test_split
-from dataclasses import dataclass
 
 
 @dataclass
-class DataIngestionConfig:
-    train_data_path: str = os.path.join('artifacts', 'train.csv')
-    test_data_path: str = os.path.join('artifacts', 'test.csv')
-    row_data_path: str = os.path.join('artifacts', 'data.csv')
+class DataTransformationConfig:
+    preprocessor_path: str = os.path.join("artifacts", "preprocessor.pkl")
 
 
-class DataIngestion:
+class DataTransformation:
     def __init__(self):
-        self.ingestion_config = DataIngestionConfig()
+        self.config = DataTransformationConfig()
 
-    def initiate_data_ingestion(self):
-        logging.info("Entered the data ingestion method or component")
+    def get_data_transformer_object(self, numerical_features, categorical_features):
         try:
-            # ✅ Fixed path warning (use forward slashes)
-            df = pd.read_csv('notebook/data/stud.csv')
-            logging.info('Read the dataset as dataframe')
-
-            # ✅ Ensure artifacts directory exists
-            os.makedirs(os.path.dirname(self.ingestion_config.train_data_path), exist_ok=True)
-
-            # ✅ Save raw data
-            df.to_csv(self.ingestion_config.row_data_path, index=False, header=True)
-
-            logging.info("Train-test split initiated")
-            train_set, test_set = train_test_split(df, test_size=0.2, random_state=42)
-
-            # ✅ Save train and test sets
-            train_set.to_csv(self.ingestion_config.train_data_path, index=False, header=True)
-            test_set.to_csv(self.ingestion_config.test_data_path, index=False, header=True)
-
-            logging.info("Ingestion of the data is completed")
-
-            return (
-                self.ingestion_config.train_data_path,
-                self.ingestion_config.test_data_path
+            # Numerical pipeline
+            num_pipeline = Pipeline(
+                steps=[
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("scaler", StandardScaler())
+                ]
             )
+
+            # Categorical pipeline (only if you have categorical features)
+            cat_pipeline = Pipeline(
+                steps=[
+                    ("imputer", SimpleImputer(strategy="most_frequent"))
+                ]
+            )
+
+            # Column transformer
+            preprocessor = ColumnTransformer(
+                transformers=[
+                    ("num", num_pipeline, numerical_features),
+                    ("cat", cat_pipeline, categorical_features)
+                ]
+            )
+            return preprocessor
 
         except Exception as e:
             raise CustomException(e, sys)
 
+    def initiate_data_transformation(self, train_path, test_path):
+        try:
+            logging.info("Starting data transformation...")
 
-if __name__ == "__main__":
-    obj = DataIngestion()
-    train_path, test_path = obj.initiate_data_ingestion()
-    print(f"✅ Training data saved at: {train_path}")
-    print(f"✅ Testing data saved at: {test_path}")
+            # Load train and test datasets
+            train_df = pd.read_csv(train_path)
+            test_df = pd.read_csv(test_path)
+
+            # Assume target column name
+            target_column = "target"
+            numerical_features = [col for col in train_df.columns if col != target_column]
+            categorical_features = []  # add categorical column names if available
+
+            input_features_train = train_df.drop(columns=[target_column])
+            target_feature_train = train_df[target_column]
+
+            input_features_test = test_df.drop(columns=[target_column])
+            target_feature_test = test_df[target_column]
+
+            # Preprocessor
+            preprocessor = self.get_data_transformer_object(
+                numerical_features, categorical_features
+            )
+
+            input_features_train_arr = preprocessor.fit_transform(input_features_train)
+            input_features_test_arr = preprocessor.transform(input_features_test)
+
+            # Save preprocessor
+            os.makedirs(os.path.dirname(self.config.preprocessor_path), exist_ok=True)
+            with open(self.config.preprocessor_path, "wb") as f:
+                pickle.dump(preprocessor, f)
+
+            logging.info("Data transformation completed successfully.")
+
+            return (
+                input_features_train_arr,
+                target_feature_train,
+                input_features_test_arr,
+                target_feature_test,
+                self.config.preprocessor_path,
+            )
+
+        except Exception as e:
+            raise CustomException(e, sys)
