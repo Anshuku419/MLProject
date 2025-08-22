@@ -4,3 +4,6 @@ seaborn
 scikit-learn
 # -e .
 dill
+catboost
+xgboost
+matplotlib
